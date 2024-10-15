@@ -68,7 +68,7 @@ class BasicMAC:
 
     
         agent_outs2,self.hidden_states, self.h2,self.h3,self.h4,self.h5,self.h6 = self.agent(agent_inputs, self.hidden_states, self.h2,self.h3,self.h4,self.h5,self.h6)
-        agent_outs = (agent_outs + agent_outs2)/th.tensor(2).to("cuda")
+        agent_outs = (agent_outs + agent_outs2)/th.tensor(2)#.to("cuda")
 
         if(learner!=None and execute==True):
             #t_alpha = min(5.5,4+t/600000)
