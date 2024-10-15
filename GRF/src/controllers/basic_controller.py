@@ -28,21 +28,48 @@ class BasicMAC:
     def forward(self, ep_batch, t, test_mode=False,training=False,learner=None,execute=False):
         agent_inputs = self._build_inputs(ep_batch, t)
         avail_actions = ep_batch["avail_actions"][:, t]
-
+        
         if(self.args.soft_modul):
             if(execute):
-                agent_outs = self.pf(agent_inputs,idx=th.tensor([float(i) for i in range(self.args.n_agents)]).view(self.args.n_agents,1))
+                # code for parallel runnner
+                x = [float(i) for i in range(self.args.n_agents)]
+                if self.args.use_cuda:
+                    all_x = th.tensor([x] * ep_batch.batch_size).to("cuda")
+                else:
+                    all_x = th.tensor([x] * ep_batch.batch_size)
+                all_x = all_x.view(agent_inputs.shape[0],1)
+                agent_outs = self.pf(agent_inputs,idx=all_x)
                 
+                # code for episode runner
+                #agent_outs = self.pf(agent_inputs,idx=th.tensor([float(i) for i in range(self.args.n_agents)]).view(self.args.n_agents,1))
             else:
+                # code for parallel runnner
+                x = [float(i) for i in range(self.args.n_agents)]
+                if self.args.use_cuda:
+                    all_x = th.tensor([x] * ep_batch.batch_size).to("cuda")
+                else:
+                    all_x = th.tensor([x] * ep_batch.batch_size)
+                all_x = all_x.view(agent_inputs.shape[0],1)
+                agent_outs = self.pf(agent_inputs,idx=all_x)
+
+                # code for episode runner
+                '''
+                #b_size = ep_batch.batch_size
+                #index = b_size/self.args.n_agents
+                #total_size = b_size*self.args.n_agents
+                #agent_outs = self.pf(agent_inputs,idx=th.tensor([float(math.floor(i/index)) for i in range(total_size)]).view(total_size,1))
                 x = [float(i) for i in range(self.args.n_agents)]
                 all_x = th.tensor([x] * ep_batch.batch_size)
                 all_x = all_x.view(agent_inputs.shape[0],1)
-                agent_outs = self.pf(agent_inputs,idx=all_x)         
-        else:    
+                agent_outs = self.pf(agent_inputs,idx=all_x)
+                '''
+        else:
             agent_outs,self.hidden_states= self.agent(agent_inputs, self.hidden_states)
-        
 
-        
+    
+        agent_outs2,self.hidden_states, self.h2,self.h3,self.h4,self.h5,self.h6 = self.agent(agent_inputs, self.hidden_states, self.h2,self.h3,self.h4,self.h5,self.h6)
+        agent_outs = (agent_outs + agent_outs2)/th.tensor(2).to("cuda")
+
         if(learner!=None and execute==True):
             #t_alpha = min(5.5,4+t/600000)
             inputs = learner.critic._build_inputs(ep_batch,ep_batch.batch_size,ep_batch.max_seq_length)
@@ -146,14 +173,15 @@ class BasicMAC:
         self.h7.unsqueeze(0).expand(batch_size, self.n_agents, -1)
         a = 1
         '''
-        if(not self.args.soft_modul):
-            self.hidden_states = self.agent.init_hidden().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # bav
-        '''
+        
+        self.hidden_states = self.agent.init_hidden().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # bav
+        
         self.h2 = self.agent.init_hidden2().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # ba    
         self.h3 = self.agent.init_hidden3().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # ba
         self.h4 = self.agent.init_hidden4().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # ba
         self.h5 = self.agent.init_hidden5().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # ba
         self.h6 = self.agent.init_hidden6().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # ba
+        '''
         self.h7 = self.agent.init_hidden7().unsqueeze(0).expand(batch_size, self.n_agents, -1)  # ba
         '''
         a=1
@@ -168,24 +196,26 @@ class BasicMAC:
             self.pf.load_state_dict(other_mac.pf.state_dict())
         else:
             self.agent.load_state_dict(other_mac.agent.state_dict())
-
+        self.agent.load_state_dict(other_mac.agent.state_dict())
     def cuda(self):
+        if(self.args.soft_modul):
+            self.pf.cuda()
+        else:    
+            self.agent.cuda()
         self.agent.cuda()
-
     def save_models(self, path):
         if(self.args.soft_modul):
             th.save(self.pf.state_dict(), "{}/agent.th".format(path))
         else:
             th.save(self.agent.state_dict(), "{}/agent.th".format(path))
-
+        th.save(self.agent.state_dict(), "{}/agent.th".format(path))
     def load_models(self, path):
         if(self.args.soft_modul):
             self.pf.load_state_dict(th.load("{}/agent.th".format(path), map_location=lambda storage, loc: storage))
         else:    
             self.agent.load_state_dict(th.load("{}/agent.th".format(path), map_location=lambda storage, loc: storage))
-
+        self.agent.load_state_dict(th.load("{}/agent.th".format(path), map_location=lambda storage, loc: storage))
     def _build_agents(self, input_shape):
-
         if(self.args.soft_modul):
             '''
             net={
@@ -228,8 +258,7 @@ class BasicMAC:
                                                 **net)
         else:
             self.agent = agent_REGISTRY[self.args.agent](input_shape, self.args)
-
-    
+        self.agent = agent_REGISTRY[self.args.agent](input_shape, self.args)
     def _build_inputs(self, batch, t):
         # Assumes homogenous agents with flat observations.
         # Other MACs might want to e.g. delegate building inputs to each agent
